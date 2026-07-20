@@ -1,0 +1,97 @@
+# Servo configuration used by the manual Robot-Controller application.
+# Values intentionally describe the current controller behavior so the shared
+# compatibility checker exposes every difference from Kinematics.
+schema_version = "1.0"
+units_angle = "deg"
+units_pulse = "us"
+
+[defaults]
+# PCA9685 output frequency.
+pwm_frequency_hz = 50
+# PCA9685 resolution used to convert between counts and pulse widths.
+pca9685_resolution_counts = 4096
+# Legacy Arduino mapping retained by the translated controller.
+pulse_count_min = 150
+pulse_count_max = 600
+mapping_angle_min_deg = 0
+mapping_angle_max_deg = 180
+
+[joints.J1_base]
+controller_name = "base"
+function = "base_rotation"
+servo_model = "Miuzei_20kg_digital_270_degree"
+channel = 0
+direction = 1
+initial_angle_deg = 110
+angle_min_deg = 0
+angle_max_deg = 230
+pulse_min_us = 732.421875
+neutral_pulse_us = 1831.0546875
+pulse_max_us = 2929.6875
+speed_deg_per_update = 1
+
+[joints.J2_shoulder]
+controller_name = "shoulder"
+function = "shoulder"
+servo_model = "Miuzei_DS3218_20kg_270_degree"
+channel = 2
+direction = 1
+initial_angle_deg = 67
+angle_min_deg = 50
+angle_max_deg = 95
+pulse_min_us = 732.421875
+neutral_pulse_us = 1831.0546875
+pulse_max_us = 2929.6875
+speed_deg_per_update = 1
+
+[joints.J3_elbow]
+controller_name = "elbow"
+function = "elbow"
+servo_model = "Miuzei_DS3218_20kg_270_degree"
+channel = 4
+direction = 1
+initial_angle_deg = 65
+angle_min_deg = 65
+angle_max_deg = 150
+pulse_min_us = 732.421875
+neutral_pulse_us = 1831.0546875
+pulse_max_us = 2929.6875
+speed_deg_per_update = 1
+
+[joints.J4_wrist]
+controller_name = "wrist"
+function = "wrist_pitch"
+# The current controller drives channel 6 as the wrist. According to the
+# hardware assignment used by Kinematics, channel 6 is the MG995 gripper servo.
+servo_model = "MG995"
+channel = 6
+direction = 1
+initial_angle_deg = 45
+angle_min_deg = 0
+angle_max_deg = 100
+pulse_min_us = 732.421875
+neutral_pulse_us = 1831.0546875
+pulse_max_us = 2929.6875
+speed_deg_per_update = 2
+
+[joints.J5_gripper]
+controller_name = "gripper"
+function = "gripper"
+# The current controller drives channel 8 as the gripper. According to the
+# hardware assignment used by Kinematics, channel 8 is the B2122 wrist servo.
+servo_model = "B2122_analog_feedback_120_degree"
+channel = 8
+direction = 1
+initial_angle_deg = 0
+angle_min_deg = 0
+angle_max_deg = 90
+pulse_min_us = 732.421875
+neutral_pulse_us = 1831.0546875
+pulse_max_us = 2929.6875
+speed_deg_per_update = 1
+# R1 and L1 commands from the translated Arduino controller, expressed as the
+# resulting pulse widths at 50 Hz.
+gripper_open_us = 732.421875
+gripper_closed_us = 1831.0546875
+open_angle_deg = 0
+closed_angle_deg = 90

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="sdkName" value="SSH (sftp://robot@192.168.74.17:22/home/robot/venvs/Robot-Controller/bin/python)" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="SSH (sftp://robot@192.168.74.17:22/home/robot/venvs/Robot-Controller/bin/python)" project-jdk-type="Python SDK" />
+</project>
