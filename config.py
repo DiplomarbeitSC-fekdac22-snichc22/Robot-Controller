@@ -92,7 +92,6 @@ def _load_servo_settings() -> tuple[
     int,
     int,
     int,
-    int,
     dict[str, ServoConfig],
     ServoConfig,
     int,
@@ -237,7 +236,6 @@ def _load_servo_settings() -> tuple[
 
     return (
         frequency_hz,
-        resolution,
         pulse_count_min,
         pulse_count_max,
         servos,
@@ -249,7 +247,6 @@ def _load_servo_settings() -> tuple[
 
 (
     PCA9685_FREQUENCY_HZ,
-    PCA9685_RESOLUTION_COUNTS,
     SERVO_PULSE_MIN,
     SERVO_PULSE_MAX,
     SERVOS,

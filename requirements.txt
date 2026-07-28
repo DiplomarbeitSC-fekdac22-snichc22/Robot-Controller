@@ -1,9 +1,8 @@
-# Raspberry Pi hardware dependencies.
-# Do not add the unrelated PyPI package named "board". Adafruit-Blinka provides
-# the correct board module containing board.SCL and board.SDA.
-Adafruit-Blinka
+adafruit-blinka
 adafruit-circuitpython-pca9685
 gpiozero
 RPLCD
 smbus2
 spidev
+adafruit-pca9685
+board
