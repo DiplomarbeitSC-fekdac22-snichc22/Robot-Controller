@@ -1,0 +1,245 @@
+{
+  "schema_version": "1.0",
+  "positions": {
+    "home": {
+      "recorded_at_utc": "2026-07-23T12:06:27.985351+00:00",
+      "joints": {
+        "J1_base": {
+          "joint_name": "J1_base",
+          "channel": 0,
+          "command_angle_deg": 20,
+          "pulse_count": 200,
+          "pulse_us": 976.5625,
+          "duty_cycle": 3200,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J2_shoulder": {
+          "joint_name": "J2_shoulder",
+          "channel": 2,
+          "command_angle_deg": 83,
+          "pulse_count": 357,
+          "pulse_us": 1743.1640625,
+          "duty_cycle": 5712,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J3_elbow": {
+          "joint_name": "J3_elbow",
+          "channel": 4,
+          "command_angle_deg": 115,
+          "pulse_count": 437,
+          "pulse_us": 2133.7890625,
+          "duty_cycle": 6992,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J4_wrist": {
+          "joint_name": "J4_wrist",
+          "channel": 6,
+          "command_angle_deg": 36,
+          "pulse_count": 240,
+          "pulse_us": 1171.875,
+          "duty_cycle": 3840,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J5_gripper": {
+          "joint_name": "J5_gripper",
+          "channel": 8,
+          "command_angle_deg": 0,
+          "pulse_count": 150,
+          "pulse_us": 732.421875,
+          "duty_cycle": 2400,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        }
+      }
+    },
+    "ready": {
+      "recorded_at_utc": "2026-07-23T12:09:13.157249+00:00",
+      "joints": {
+        "J1_base": {
+          "joint_name": "J1_base",
+          "channel": 0,
+          "command_angle_deg": 21,
+          "pulse_count": 202,
+          "pulse_us": 986.328125,
+          "duty_cycle": 3232,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J2_shoulder": {
+          "joint_name": "J2_shoulder",
+          "channel": 2,
+          "command_angle_deg": 93,
+          "pulse_count": 382,
+          "pulse_us": 1865.234375,
+          "duty_cycle": 6112,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J3_elbow": {
+          "joint_name": "J3_elbow",
+          "channel": 4,
+          "command_angle_deg": 137,
+          "pulse_count": 492,
+          "pulse_us": 2402.34375,
+          "duty_cycle": 7872,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J4_wrist": {
+          "joint_name": "J4_wrist",
+          "channel": 6,
+          "command_angle_deg": 50,
+          "pulse_count": 275,
+          "pulse_us": 1342.7734375,
+          "duty_cycle": 4400,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J5_gripper": {
+          "joint_name": "J5_gripper",
+          "channel": 8,
+          "command_angle_deg": 0,
+          "pulse_count": 150,
+          "pulse_us": 732.421875,
+          "duty_cycle": 2400,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        }
+      }
+    },
+    "drop_off": {
+      "recorded_at_utc": "2026-07-23T12:10:47.263760+00:00",
+      "joints": {
+        "J1_base": {
+          "joint_name": "J1_base",
+          "channel": 0,
+          "command_angle_deg": 80,
+          "pulse_count": 350,
+          "pulse_us": 1708.984375,
+          "duty_cycle": 5600,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J2_shoulder": {
+          "joint_name": "J2_shoulder",
+          "channel": 2,
+          "command_angle_deg": 77,
+          "pulse_count": 342,
+          "pulse_us": 1669.921875,
+          "duty_cycle": 5472,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J3_elbow": {
+          "joint_name": "J3_elbow",
+          "channel": 4,
+          "command_angle_deg": 104,
+          "pulse_count": 410,
+          "pulse_us": 2001.953125,
+          "duty_cycle": 6560,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J4_wrist": {
+          "joint_name": "J4_wrist",
+          "channel": 6,
+          "command_angle_deg": 32,
+          "pulse_count": 230,
+          "pulse_us": 1123.046875,
+          "duty_cycle": 3680,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J5_gripper": {
+          "joint_name": "J5_gripper",
+          "channel": 8,
+          "command_angle_deg": 0,
+          "pulse_count": 150,
+          "pulse_us": 732.421875,
+          "duty_cycle": 2400,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        }
+      }
+    },
+    "sees_everything": {
+      "recorded_at_utc": "2026-07-23T12:24:08.870284+00:00",
+      "joints": {
+        "J1_base": {
+          "joint_name": "J1_base",
+          "channel": 0,
+          "command_angle_deg": 0,
+          "pulse_count": 150,
+          "pulse_us": 732.421875,
+          "duty_cycle": 2400,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J2_shoulder": {
+          "joint_name": "J2_shoulder",
+          "channel": 2,
+          "command_angle_deg": 92,
+          "pulse_count": 380,
+          "pulse_us": 1855.46875,
+          "duty_cycle": 6080,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J3_elbow": {
+          "joint_name": "J3_elbow",
+          "channel": 4,
+          "command_angle_deg": 82,
+          "pulse_count": 355,
+          "pulse_us": 1733.3984375,
+          "duty_cycle": 5680,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J4_wrist": {
+          "joint_name": "J4_wrist",
+          "channel": 6,
+          "command_angle_deg": 9,
+          "pulse_count": 172,
+          "pulse_us": 839.84375,
+          "duty_cycle": 2752,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        },
+        "J5_gripper": {
+          "joint_name": "J5_gripper",
+          "channel": 8,
+          "command_angle_deg": 0,
+          "pulse_count": 150,
+          "pulse_us": 732.421875,
+          "duty_cycle": 2400,
+          "legacy_endpoint_min_count": 150,
+          "legacy_endpoint_max_count": 600,
+          "outside_legacy_endpoint": false
+        }
+      }
+    }
+  }
+}

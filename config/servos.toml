@@ -1,7 +1,7 @@
 # Servo configuration used by the manual Robot-Controller application.
 # Values intentionally describe the current controller behavior so the shared
 # compatibility checker exposes every difference from Kinematics.
-schema_version = "1.0"
+schema_version = "1.1"
 units_angle = "deg"
 units_pulse = "us"
 
@@ -22,9 +22,9 @@ function = "base_rotation"
 servo_model = "Miuzei_20kg_digital_270_degree"
 channel = 0
 direction = 1
-initial_angle_deg = 110
+initial_angle_deg = 20
 angle_min_deg = 0
-angle_max_deg = 230
+angle_max_deg = 130
 pulse_min_us = 732.421875
 neutral_pulse_us = 1831.0546875
 pulse_max_us = 2929.6875
@@ -36,7 +36,7 @@ function = "shoulder"
 servo_model = "Miuzei_DS3218_20kg_270_degree"
 channel = 2
 direction = 1
-initial_angle_deg = 67
+initial_angle_deg = 83
 angle_min_deg = 50
 angle_max_deg = 95
 pulse_min_us = 732.421875
@@ -50,7 +50,7 @@ function = "elbow"
 servo_model = "Miuzei_DS3218_20kg_270_degree"
 channel = 4
 direction = 1
-initial_angle_deg = 65
+initial_angle_deg = 115
 angle_min_deg = 65
 angle_max_deg = 150
 pulse_min_us = 732.421875
@@ -66,9 +66,9 @@ function = "wrist_pitch"
 servo_model = "MG995"
 channel = 6
 direction = 1
-initial_angle_deg = 45
+initial_angle_deg = 36
 angle_min_deg = 0
-angle_max_deg = 100
+angle_max_deg = 75
 pulse_min_us = 732.421875
 neutral_pulse_us = 1831.0546875
 pulse_max_us = 2929.6875

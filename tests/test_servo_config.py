@@ -8,6 +8,7 @@ import config
 class ServoConfigurationTests(unittest.TestCase):
     def test_legacy_controller_values_are_loaded_from_toml(self) -> None:
         self.assertEqual(config.PCA9685_FREQUENCY_HZ, 50)
+        self.assertEqual(config.PCA9685_RESOLUTION_COUNTS, 4096)
         self.assertEqual(config.SERVO_PULSE_MIN, 150)
         self.assertEqual(config.SERVO_PULSE_MAX, 600)
         self.assertEqual(

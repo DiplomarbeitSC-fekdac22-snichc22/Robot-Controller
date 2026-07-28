@@ -1,5 +1,7 @@
 """Raspberry Pi hardware adapters for the LCD, buttons, relay and PCA9685."""
 
+from __future__ import annotations
+
 import board
 import busio
 from adafruit_pca9685 import PCA9685
@@ -7,28 +9,89 @@ from gpiozero import Button, DigitalOutputDevice
 from RPLCD.i2c import CharLCD
 
 import config
+from pwm_output import PwmOutput, build_pwm_output
+
+
+class BlinkaBoardError(RuntimeError):
+    """Raised when the wrong Python ``board`` package shadows Adafruit Blinka."""
+
+
+def _create_i2c_bus():
+    """Create the Raspberry Pi I2C bus and diagnose a shadowed Blinka module."""
+    missing = [name for name in ("SCL", "SDA") if not hasattr(board, name)]
+    if missing:
+        module_path = getattr(board, "__file__", "unknown")
+        raise BlinkaBoardError(
+            "The imported Python module named 'board' is not the Adafruit Blinka "
+            "Raspberry Pi board module. Missing attributes: "
+            f"{', '.join(missing)}. Imported from: {module_path}.\n"
+            "Activate the Robot-Controller virtual environment and run:\n"
+            "  python -m pip uninstall -y board adafruit-pca9685\n"
+            "  python -m pip install --upgrade Adafruit-Blinka "
+            "adafruit-circuitpython-pca9685\n"
+            "Then verify with:\n"
+            "  python -c \"import board; print(board.__file__); "
+            "print(board.SCL, board.SDA)\""
+        )
+    return busio.I2C(board.SCL, board.SDA)
 
 
 def angle_to_pulse(angle: int) -> int:
-    """Match Arduino map(angle, 0, 180, 150, 600), including >180 values."""
-    return config.SERVO_PULSE_MIN + (
-        angle * (config.SERVO_PULSE_MAX - config.SERVO_PULSE_MIN) // 180
-    )
+    """Backward-compatible name returning the legacy PCA9685 count value."""
+    return build_pwm_output(
+        joint_name="legacy",
+        channel=0,
+        command_angle_deg=angle,
+        count_min=config.SERVO_PULSE_MIN,
+        count_max=config.SERVO_PULSE_MAX,
+        frequency_hz=config.PCA9685_FREQUENCY_HZ,
+        resolution_counts=config.PCA9685_RESOLUTION_COUNTS,
+    ).pulse_count
 
 
 class ServoBoard:
     def __init__(self) -> None:
-        self._i2c = busio.I2C(board.SCL, board.SDA)
-        self._pca = PCA9685(self._i2c, address=config.PCA9685_ADDRESS)
-        self._pca.frequency = config.PCA9685_FREQUENCY_HZ
+        self._i2c = _create_i2c_bus()
+        try:
+            self._pca = PCA9685(self._i2c, address=config.PCA9685_ADDRESS)
+            self._pca.frequency = config.PCA9685_FREQUENCY_HZ
+        except Exception:
+            self._i2c.deinit()
+            raise
+        self._last_outputs: dict[int, PwmOutput] = {}
 
-    def set_angle(self, channel: int, angle: int) -> None:
-        pulse_count = angle_to_pulse(angle)
-        if not 0 <= pulse_count <= 4095:
-            raise ValueError(f"Servo pulse count is out of range: {pulse_count}")
+    @property
+    def last_outputs(self) -> dict[int, PwmOutput]:
+        return dict(self._last_outputs)
 
-        # PCA9685 has 12-bit counts; the CircuitPython driver accepts 16-bit duty.
-        self._pca.channels[channel].duty_cycle = pulse_count << 4
+    def set_angle(
+        self,
+        channel: int,
+        angle: int,
+        *,
+        joint_name: str | None = None,
+    ) -> PwmOutput:
+        """Send one legacy angle command and return the exact generated PWM data."""
+        output = build_pwm_output(
+            joint_name=joint_name or f"channel_{channel}",
+            channel=channel,
+            command_angle_deg=angle,
+            count_min=config.SERVO_PULSE_MIN,
+            count_max=config.SERVO_PULSE_MAX,
+            frequency_hz=config.PCA9685_FREQUENCY_HZ,
+            resolution_counts=config.PCA9685_RESOLUTION_COUNTS,
+        )
+        self._pca.channels[channel].duty_cycle = output.duty_cycle
+        self._last_outputs[channel] = output
+        return output
+
+    def set_servo(self, servo: config.ServoConfig, angle: int) -> PwmOutput:
+        """Send a command using a loaded servo definition."""
+        return self.set_angle(
+            servo.channel,
+            angle,
+            joint_name=servo.joint_name,
+        )
 
     def close(self) -> None:
         self._pca.deinit()
@@ -70,7 +133,6 @@ class Display:
         self._write_at(3, column, text)
 
     def update_timer(self, time_left: int) -> None:
-        # Fixed-width output clears digits left over from the previous value.
         self._write_at(2, 6, f"Zeit: {time_left:>3}s ")
 
     def close(self) -> None:
@@ -89,16 +151,15 @@ class Controls:
         self.test_button = Button(
             config.TEST_BUTTON_PIN, pull_up=True, bounce_time=0.05
         )
-        # HIGH in idle and LOW while the game is active, like the Arduino code.
         self.led_relay = DigitalOutputDevice(
             config.LED_RELAY_PIN, active_high=True, initial_value=True
         )
 
     def set_game_light(self, enabled: bool) -> None:
         if enabled:
-            self.led_relay.off()  # LOW: active-low relay enabled
+            self.led_relay.off()
         else:
-            self.led_relay.on()  # HIGH: relay disabled
+            self.led_relay.on()
 
     def close(self) -> None:
         self.set_game_light(False)
@@ -106,4 +167,3 @@ class Controls:
         self.stop_button.close()
         self.test_button.close()
         self.led_relay.close()
-
