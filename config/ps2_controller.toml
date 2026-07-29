@@ -1,0 +1,105 @@
+schema_version = "1.1"
+units_angle = "deg"
+units_pulse = "us"
+
+[controller]
+loop_hz = 50.0
+status_hz = 5.0
+dead_zone = 18
+disconnect_timeout_seconds = 0.50
+reconnect_interval_seconds = 0.50
+
+[servo_board]
+i2c_address = 64
+frequency_hz = 50
+pca9685_resolution_counts = 4096
+pulse_count_min = 150
+pulse_count_max = 600
+mapping_angle_min_deg = 0
+mapping_angle_max_deg = 180
+
+[servos.base]
+controller_name = "base"
+function = "base_rotation"
+servo_model = "Miuzei_20kg_digital_270_degree"
+channel = 0
+axis = "left_x"
+invert = -1
+direction = 1
+initial_angle_deg = 20
+angle_min_deg = 0
+angle_max_deg = 130
+minimum_pulse_us = 732.421875
+neutral_pulse_us = 1831.0546875
+maximum_pulse_us = 2929.6875
+speed_deg_per_update = 1
+speed_us_per_second = 260.0
+
+[servos.shoulder]
+controller_name = "shoulder"
+function = "shoulder"
+servo_model = "Miuzei_DS3218_20kg_270_degree"
+channel = 2
+axis = "left_y"
+invert = -1
+direction = 1
+initial_angle_deg = 83
+angle_min_deg = 50
+angle_max_deg = 95
+minimum_pulse_us = 732.421875
+neutral_pulse_us = 1831.0546875
+maximum_pulse_us = 2929.6875
+speed_deg_per_update = 1
+speed_us_per_second = 180.0
+
+[servos.elbow]
+controller_name = "elbow"
+function = "elbow"
+servo_model = "Miuzei_DS3218_20kg_270_degree"
+channel = 4
+axis = "right_y"
+invert = 1
+direction = 1
+initial_angle_deg = 115
+angle_min_deg = 65
+angle_max_deg = 150
+minimum_pulse_us = 732.421875
+neutral_pulse_us = 1831.0546875
+maximum_pulse_us = 2929.6875
+speed_deg_per_update = 1
+speed_us_per_second = 220.0
+
+[servos.wrist]
+controller_name = "wrist"
+function = "wrist_pitch"
+servo_model = "MG995"
+channel = 6
+axis = "right_x"
+invert = 1
+direction = 1
+initial_angle_deg = 36
+angle_min_deg = 0
+angle_max_deg = 75
+minimum_pulse_us = 732.421875
+neutral_pulse_us = 1831.0546875
+maximum_pulse_us = 2929.6875
+speed_deg_per_update = 2
+speed_us_per_second = 180.0
+
+[gripper]
+controller_name = "gripper"
+function = "gripper"
+servo_model = "B2122_analog_feedback_120_degree"
+channel = 8
+direction = 1
+initial_angle_deg = 0
+angle_min_deg = -2.656
+angle_max_deg = 90
+minimum_pulse_us = 732.421875
+neutral_pulse_us = 1831.0546875
+maximum_pulse_us = 2929.6875
+speed_deg_per_update = 1
+open_angle_deg = 0
+closed_angle_deg = 90
+open_pulse_us = 732.421875
+closed_pulse_us = 1831.0546875
