@@ -16,7 +16,10 @@ STOP_BUTTON_GPIO = 6
 
 
 class GameDisplay:
-    def __init__(self, duration_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        duration_seconds: float = 30.0,
+    ) -> None:
         self.duration_seconds = duration_seconds
 
         self.lcd = CharLCD(
@@ -28,6 +31,7 @@ class GameDisplay:
             charmap="A00",
             auto_linebreaks=False,
         )
+
         self.lcd.backlight_enabled = True
 
         self.start_button = Button(
@@ -47,13 +51,20 @@ class GameDisplay:
         self.last_seconds: int | None = None
         self.last_armed: bool | None = None
 
-        self.previous_start = self.start_button.is_pressed
-        self.previous_stop = self.stop_button.is_pressed
+        self.previous_start = (
+            self.start_button.is_pressed
+        )
+        self.previous_stop = (
+            self.stop_button.is_pressed
+        )
 
         self.show_ready()
 
     @staticmethod
-    def _fit(text: str, centered: bool = False) -> str:
+    def _fit(
+        text: str,
+        centered: bool = False,
+    ) -> str:
         text = text[:LCD_COLUMNS]
 
         if centered:
@@ -68,8 +79,12 @@ class GameDisplay:
         centered: bool = False,
     ) -> None:
         self.lcd.cursor_pos = (row, 0)
+
         self.lcd.write_string(
-            self._fit(text, centered)
+            self._fit(
+                text,
+                centered,
+            )
         )
 
     def show_ready(self) -> None:
@@ -77,10 +92,26 @@ class GameDisplay:
         self.last_seconds = None
         self.last_armed = None
 
-        self._line(0, "PIA AUTOMATION", centered=True)
-        self._line(1, "ROBI V01", centered=True)
-        self._line(2, "READY", centered=True)
-        self._line(3, "PRESS GREEN START", centered=True)
+        self._line(
+            0,
+            "PIA AUTOMATION",
+            centered=True,
+        )
+        self._line(
+            1,
+            "ROBI V01",
+            centered=True,
+        )
+        self._line(
+            2,
+            "READY",
+            centered=True,
+        )
+        self._line(
+            3,
+            "PRESS GREEN START",
+            centered=True,
+        )
 
     def start_game(
         self,
@@ -88,53 +119,118 @@ class GameDisplay:
         armed: bool,
     ) -> None:
         self.game_active = True
-        self.game_ends_at = now + self.duration_seconds
+        self.game_ends_at = (
+            now + self.duration_seconds
+        )
+
         self.last_seconds = None
         self.last_armed = None
 
-        self._line(0, "PIA AUTOMATION", centered=True)
-        self._line(1, "GAME START", centered=True)
+        self._line(
+            0,
+            "PIA AUTOMATION",
+            centered=True,
+        )
+        self._line(
+            1,
+            "GAME START",
+            centered=True,
+        )
 
-        self._update_game_screen(now, armed)
+        self._update_game_screen(
+            now,
+            armed,
+        )
 
     def show_game_over(self) -> None:
         self.game_active = False
         self.last_seconds = None
         self.last_armed = None
 
-        self._line(0, "PIA AUTOMATION", centered=True)
-        self._line(1, "GAME OVER", centered=True)
-        self._line(2, "OPENING GRIPPER", centered=True)
-        self._line(3, "RETURNING HOME", centered=True)
-        self._line(3, "PRESS GREEN START", centered=True)
+        self._line(
+            0,
+            "PIA AUTOMATION",
+            centered=True,
+        )
+        self._line(
+            1,
+            "GAME OVER",
+            centered=True,
+        )
+        self._line(
+            2,
+            "OPENING GRIPPER",
+            centered=True,
+        )
+        self._line(
+            3,
+            "RETURNING HOME",
+            centered=True,
+        )
 
     def show_game_over_complete(
-            self,
-            home_reached: bool,
+        self,
+        home_reached: bool,
     ) -> None:
         self.game_active = False
         self.last_seconds = None
         self.last_armed = None
 
-        self._line(0, "PIA AUTOMATION", centered=True)
-        self._line(1, "GAME OVER", centered=True)
+        self._line(
+            0,
+            "PIA AUTOMATION",
+            centered=True,
+        )
+        self._line(
+            1,
+            "GAME OVER",
+            centered=True,
+        )
 
         if home_reached:
-            self._line(2, "HOME - GRIPPER OPEN", centered=True)
+            self._line(
+                2,
+                "HOME - GRIPPER OPEN",
+                centered=True,
+            )
         else:
-            self._line(2, "PWM WAS DISABLED", centered=True)
+            self._line(
+                2,
+                "PWM WAS DISABLED",
+                centered=True,
+            )
 
-        self._line(3, "PRESS GREEN START", centered=True)
+        self._line(
+            3,
+            "PRESS GREEN START",
+            centered=True,
+        )
 
     def show_stopped(self) -> None:
         self.game_active = False
         self.last_seconds = None
         self.last_armed = None
 
-        self._line(0, "PIA AUTOMATION", centered=True)
-        self._line(1, "GAME STOPPED", centered=True)
-        self._line(2, "PWM DISABLED", centered=True)
-        self._line(3, "PRESS GREEN START", centered=True)
+        self._line(
+            0,
+            "PIA AUTOMATION",
+            centered=True,
+        )
+        self._line(
+            1,
+            "GAME STOPPED",
+            centered=True,
+        )
+        self._line(
+            2,
+            "PWM DISABLED",
+            centered=True,
+        )
+        self._line(
+            3,
+            "PRESS GREEN START",
+            centered=True,
+        )
 
     def _update_game_screen(
         self,
@@ -143,7 +239,9 @@ class GameDisplay:
     ) -> None:
         seconds = max(
             0,
-            math.ceil(self.game_ends_at - now),
+            math.ceil(
+                self.game_ends_at - now
+            ),
         )
 
         if seconds != self.last_seconds:
@@ -152,15 +250,22 @@ class GameDisplay:
                 f"TIME LEFT: {seconds:02d} s",
                 centered=True,
             )
+
             self.last_seconds = seconds
 
         if armed != self.last_armed:
-            if armed:
-                arm_text = "ARM: ENABLED"
-            else:
-                arm_text = "ARM: DISABLED"
+            arm_text = (
+                "ARM: ENABLED"
+                if armed
+                else "ARM: DISABLED"
+            )
 
-            self._line(3, arm_text, centered=True)
+            self._line(
+                3,
+                arm_text,
+                centered=True,
+            )
+
             self.last_armed = armed
 
     def update(
@@ -168,8 +273,12 @@ class GameDisplay:
         now: float,
         armed: bool,
     ) -> str | None:
-        start_pressed = self.start_button.is_pressed
-        stop_pressed = self.stop_button.is_pressed
+        start_pressed = (
+            self.start_button.is_pressed
+        )
+        stop_pressed = (
+            self.stop_button.is_pressed
+        )
 
         event: str | None = None
 
@@ -178,10 +287,16 @@ class GameDisplay:
             and not self.previous_start
             and not self.game_active
         ):
-            self.start_game(now, armed)
+            self.start_game(
+                now,
+                armed,
+            )
             event = "game_started"
 
-        if stop_pressed and not self.previous_stop:
+        if (
+            stop_pressed
+            and not self.previous_stop
+        ):
             self.show_stopped()
             event = "game_stopped"
 
@@ -193,13 +308,15 @@ class GameDisplay:
                 self.show_game_over()
                 event = "game_over"
             else:
-                self._update_game_screen(now, armed)
+                self._update_game_screen(
+                    now,
+                    armed,
+                )
 
         return event
 
     def close(self) -> None:
         self.start_button.close()
         self.stop_button.close()
-
         self.lcd.clear()
         self.lcd.close(clear=False)

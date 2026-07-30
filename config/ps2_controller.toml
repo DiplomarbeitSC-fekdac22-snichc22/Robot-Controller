@@ -18,6 +18,9 @@ pulse_count_max = 600
 mapping_angle_min_deg = 0
 mapping_angle_max_deg = 180
 
+# Raw PS2 stick values:
+# left/up is near 0; right/down is near 255.
+
 [servos.base]
 controller_name = "base"
 function = "base_rotation"
@@ -28,10 +31,13 @@ invert = -1
 direction = 1
 initial_angle_deg = 20
 angle_min_deg = 0
-angle_max_deg = 130
+
+# This converts to the measured 1711 us glass-door limit.
+angle_max_deg = 80.16512
+
 minimum_pulse_us = 732.421875
 neutral_pulse_us = 1831.0546875
-maximum_pulse_us = 2929.6875
+maximum_pulse_us = 1711.0
 speed_deg_per_update = 1
 speed_us_per_second = 260.0
 

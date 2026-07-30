@@ -1,4 +1,5 @@
 RPI_LGPIO_CHIP=0 bash run_ps2_controller.sh
 
 
-// ARMED base=1001 shoulder=1582 elbow=2045 wrist=1191 gripper=732 XYZ~=(55.7,366.2,2.9)mm LX=127 LY=128 RX=127 RY=128 buttons=0x0000000
+ARMED base=1711 shoulder=1738 elbow=1948 wrist=1034 gripper=732 XYZ~=(-0.3,386.8,59.1)mm LX=127 LY=128 RX=127 RY=128 buttons=0x00000
+
