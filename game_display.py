@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import math
 
-from gpiozero import Button
+from gpiozero import Button, DigitalOutputDevice
 from RPLCD.i2c import CharLCD
 
 
-LCD_I2C_BUS = 3
+LCD_I2C_BUS = 20
 LCD_I2C_ADDRESS = 0x27
 LCD_COLUMNS = 20
 LCD_ROWS = 4
 
 START_BUTTON_GPIO = 5
 STOP_BUTTON_GPIO = 6
+
+# Physical pin 24 = BCM GPIO8.
+# The relay input is active-low:
+#   GPIO HIGH -> relay/LED off
+#   GPIO LOW  -> relay/LED on
+LED_RELAY_GPIO = 8
 
 
 class GameDisplay:
@@ -46,6 +52,12 @@ class GameDisplay:
             bounce_time=0.05,
         )
 
+        self.game_light = DigitalOutputDevice(
+            LED_RELAY_GPIO,
+            active_high=False,
+            initial_value=False,
+        )
+
         self.game_active = False
         self.game_ends_at = 0.0
         self.last_seconds: int | None = None
@@ -59,6 +71,15 @@ class GameDisplay:
         )
 
         self.show_ready()
+
+    def _set_game_light(
+        self,
+        enabled: bool,
+    ) -> None:
+        if enabled:
+            self.game_light.on()
+        else:
+            self.game_light.off()
 
     @staticmethod
     def _fit(
@@ -88,6 +109,8 @@ class GameDisplay:
         )
 
     def show_ready(self) -> None:
+        self._set_game_light(False)
+
         self.game_active = False
         self.last_seconds = None
         self.last_armed = None
@@ -118,6 +141,8 @@ class GameDisplay:
         now: float,
         armed: bool,
     ) -> None:
+        self._set_game_light(True)
+
         self.game_active = True
         self.game_ends_at = (
             now + self.duration_seconds
@@ -143,6 +168,8 @@ class GameDisplay:
         )
 
     def show_game_over(self) -> None:
+        self._set_game_light(False)
+
         self.game_active = False
         self.last_seconds = None
         self.last_armed = None
@@ -172,6 +199,8 @@ class GameDisplay:
         self,
         home_reached: bool,
     ) -> None:
+        self._set_game_light(False)
+
         self.game_active = False
         self.last_seconds = None
         self.last_armed = None
@@ -207,6 +236,8 @@ class GameDisplay:
         )
 
     def show_stopped(self) -> None:
+        self._set_game_light(False)
+
         self.game_active = False
         self.last_seconds = None
         self.last_armed = None
@@ -316,7 +347,11 @@ class GameDisplay:
         return event
 
     def close(self) -> None:
-        self.start_button.close()
-        self.stop_button.close()
-        self.lcd.clear()
-        self.lcd.close(clear=False)
+        try:
+            self._set_game_light(False)
+            self.game_light.close()
+        finally:
+            self.start_button.close()
+            self.stop_button.close()
+            self.lcd.clear()
+            self.lcd.close(clear=False)
