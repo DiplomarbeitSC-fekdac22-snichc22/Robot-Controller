@@ -109,3 +109,15 @@ open_angle_deg = 0
 closed_angle_deg = 90
 open_pulse_us = 732.421875
 closed_pulse_us = 1831.0546875
+speed_us_per_second = 350.0
+
+[operation]
+permission_seconds = 90.0
+end_message_seconds = 10.0
+motion_ramp_seconds = 0.25
+control_api_enabled = true
+control_api_port = 8765
+# Leave unverified cabinet wiring unassigned. All pin numbers are BCM.
+# setup_button_gpio = VERIFIED_WHITE_BUTTON_GPIO
+# emergency_stop_gpio = VERIFIED_NC_FEEDBACK_GPIO
+# emergency_stop_healthy_pressed = true

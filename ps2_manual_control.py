@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
+import queue
 import signal
 import sys
+import threading
 import time
 import tomllib
+from types import SimpleNamespace
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +22,8 @@ PSB_TOGGLE = 1 << 4
 PSB_DISABLE = 1 << 6
 PSB_L1 = 1 << 10
 PSB_R1 = 1 << 11
+PSB_MODE = 1 << 0
+PSB_CONFIRM = 1 << 3
 
 HOME_RETURN_MIN_SPEED_US_PER_SECOND = 300.0
 GRIPPER_RELEASE_SECONDS = 0.5
@@ -160,6 +166,7 @@ class Gripper:
     open_pulse_us: float
     closed_pulse_us: float
     start_pulse_us: float
+    speed_us_per_second: float = 350.0
 
 
 @dataclass(frozen=True)
@@ -173,6 +180,14 @@ class Settings:
     reconnect_interval_seconds: float
     axis_servos: tuple[AxisServo, ...]
     gripper: Gripper
+    permission_seconds: float = 90.0
+    end_message_seconds: float = 10.0
+    motion_ramp_seconds: float = 0.25
+    setup_button_gpio: int | None = None
+    emergency_stop_gpio: int | None = None
+    emergency_stop_healthy_pressed: bool | None = None
+    control_api_enabled: bool = True
+    control_api_port: int = 8765
 
 
 def parse_args() -> argparse.Namespace:
@@ -194,6 +209,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Read and display PS2 input without touching any servo.",
     )
+    parser.add_argument("--simulate", action="store_true",
+                        help="Test buttons, modes and movement limits without opening any hardware.")
 
     return parser.parse_args()
 
@@ -288,6 +305,36 @@ def load_settings(
         data,
         "gripper",
     )
+    operation = data.get("operation", {})
+    if not isinstance(operation, dict):
+        raise RuntimeError("operation must be a TOML table")
+    operation = {"permission_seconds": 90.0, "end_message_seconds": 10.0,
+                 "motion_ramp_seconds": 0.25, "control_api_enabled": True,
+                 "control_api_port": 8765, **operation}
+    for key in ("permission_seconds", "end_message_seconds", "motion_ramp_seconds"):
+        if require_number(operation, key, "operation") <= 0:
+            raise RuntimeError(f"operation.{key} must be positive")
+    for key in ("setup_button_gpio", "emergency_stop_gpio"):
+        if key in operation:
+            operation[key] = require_integer(operation, key, "operation")
+            if not 0 <= operation[key] <= 27:
+                raise RuntimeError(f"operation.{key} must be a BCM GPIO from 0 to 27")
+    emergency_gpio = operation.get("emergency_stop_gpio")
+    healthy_pressed = operation.get("emergency_stop_healthy_pressed")
+    if (emergency_gpio is None) != (healthy_pressed is None) or (
+        healthy_pressed is not None and healthy_pressed is not True
+    ):
+        raise RuntimeError("Configure both the E-stop feedback GPIO and verified healthy_pressed polarity")
+    pins = [pin for pin in (operation.get("setup_button_gpio"), emergency_gpio) if pin is not None]
+    if len(set(pins)) != len(pins) or any(pin in (2, 3, 5, 6, 8, 12, 13, 18, 25) for pin in pins):
+        raise RuntimeError("Optional button GPIO conflicts with an existing controller connection")
+    if type(operation["control_api_enabled"]) is not bool:
+        raise RuntimeError("operation.control_api_enabled must be boolean")
+    if not 1 <= require_integer(operation, "control_api_port", "operation") <= 65535:
+        raise RuntimeError("operation.control_api_port must be from 1 to 65535")
+    gripper_speed = gripper_table.get("speed_us_per_second", 350.0)
+    if require_number({"speed": gripper_speed}, "speed", "gripper") <= 0:
+        raise RuntimeError("gripper.speed_us_per_second must be positive")
 
     frequency_hz = require_integer(
         servo_board,
@@ -605,7 +652,16 @@ def load_settings(
             open_pulse_us=gripper_open,
             closed_pulse_us=gripper_closed,
             start_pulse_us=gripper_start,
+            speed_us_per_second=float(gripper_speed),
         ),
+        permission_seconds=float(operation["permission_seconds"]),
+        end_message_seconds=float(operation["end_message_seconds"]),
+        motion_ramp_seconds=float(operation["motion_ramp_seconds"]),
+        setup_button_gpio=operation.get("setup_button_gpio"),
+        emergency_stop_gpio=emergency_gpio,
+        emergency_stop_healthy_pressed=healthy_pressed,
+        control_api_enabled=operation["control_api_enabled"],
+        control_api_port=int(operation["control_api_port"]),
     )
 
 
@@ -876,16 +932,18 @@ class PulseServoBoard:
             board.SDA,
         )
 
-        self._pca = PCA9685(
-            self._i2c,
-            address=settings.i2c_address,
-        )
-
-        self._pca.frequency = (
-            settings.frequency_hz
-        )
-
-        self.disable_outputs()
+        self._pca = None
+        try:
+            self._pca = PCA9685(self._i2c, address=settings.i2c_address)
+            self._pca.frequency = settings.frequency_hz
+            self.disable_outputs()
+        except Exception:
+            try:
+                if self._pca is not None:
+                    self._pca.deinit()
+            finally:
+                self._i2c.deinit()
+            raise
 
     def pulse_to_duty_cycle(
         self,
@@ -924,15 +982,23 @@ class PulseServoBoard:
         )
 
     def disable_outputs(self) -> None:
+        failure = None
         for channel in self._channels:
-            self._pca.channels[
-                channel
-            ].duty_cycle = 0
+            try:
+                self._pca.channels[channel].duty_cycle = 0
+            except Exception as error:
+                failure = failure or error
+        if failure is not None:
+            raise failure
 
     def close(self) -> None:
-        self.disable_outputs()
-        self._pca.deinit()
-        self._i2c.deinit()
+        try:
+            self.disable_outputs()
+        finally:
+            try:
+                self._pca.deinit()
+            finally:
+                self._i2c.deinit()
 
 
 def axis_amount(
@@ -1066,9 +1132,11 @@ class ManualController:
     def __init__(
         self,
         settings: Settings,
+        *, controller=None, board=None, game_display=None, simulated=False, clock=None,
     ) -> None:
         self.settings = settings
-        self.controller = Ps2Controller()
+        self.clock = clock if clock is not None else time.monotonic
+        self.controller = controller if controller is not None else Ps2Controller()
 
         self.home_required_after_stop = True
 
@@ -1082,9 +1150,7 @@ class ManualController:
         self.escape_only = False
 
         try:
-            self.board = PulseServoBoard(
-                settings
-            )
+            self.board = board if board is not None else PulseServoBoard(settings)
         except Exception:
             self.controller.close()
             raise
@@ -1098,13 +1164,15 @@ class ManualController:
             settings.gripper.start_pulse_us
         )
 
-        self.kinematics = (
-            load_kinematics_model()
-        )
+        self.kinematics = None if simulated else load_kinematics_model()
 
         try:
-            self.game_display = GameDisplay(
-                duration_seconds=30.0,
+            self.game_display = game_display if game_display is not None else GameDisplay(
+                duration_seconds=settings.permission_seconds,
+                notice_seconds=settings.end_message_seconds,
+                setup_button_gpio=settings.setup_button_gpio,
+                emergency_stop_gpio=settings.emergency_stop_gpio,
+                emergency_stop_healthy_pressed=settings.emergency_stop_healthy_pressed,
             )
         except Exception:
             self.board.close()
@@ -1112,35 +1180,132 @@ class ManualController:
             raise
 
         self.armed = False
+        self.operation_mode = "manual"
+        self.game_display.operation_mode = "manual"
+        self.position_confirmed = False
+        self.simulated = simulated
+        self._outputs_disabled = True
+        self._mode_requests = queue.Queue(maxsize=1)
+        self.api_server = None
+        self.velocities = {servo.name: 0.0 for servo in settings.axis_servos}
+        self.gripper_target = self.pulses["gripper"]
+        self.last_stop_reason = "Confirm the actual arm pose with START, then grant permission"
         self.connected = False
         self.previous_buttons = 0
         self.last_good_read = 0.0
         self.next_retry = 0.0
         self.next_status = 0.0
-        self.last_loop = time.monotonic()
+        self.last_loop = self.clock()
         self.running = True
+        self._closed = False
 
-    def disable(
-        self,
-        reason: str,
-    ) -> None:
+    def neutral(self, state: ControllerState) -> bool:
+        return all(axis_amount(getattr(state, servo.axis), self.settings.dead_zone) == 0
+                   for servo in self.settings.axis_servos) and not state.buttons & (PSB_L1 | PSB_R1 | PSB_DISABLE)
+
+    def get_status(self) -> dict:
+        now = self.clock()
+        permission = self.game_display.permission
+        granted = self.game_display.movement_allowed and (
+            permission.state == "setup" or now < permission.ends_at
+        )
+        return {"mode": self.operation_mode, "permission": permission.state,
+                "permission_remaining_seconds": max(0.0, permission.ends_at - now) if permission.state == "timed" else None,
+                "armed": self.armed, "connected": self.connected,
+                "movement_allowed": self.running and self.armed and granted and self.connected and self.operation_mode == "manual",
+                "position_confirmed": self.position_confirmed,
+                "emergency_stop_available": self.game_display.emergency_stop_available,
+                "emergency_stop_active": self.game_display.emergency_stop_active,
+                "automatic_ready": False, "simulated": self.simulated,
+                "reason": self.last_stop_reason}
+
+    def set_mode(self, mode: str, now=None) -> None:
+        if mode not in ("manual", "automatic"):
+            raise ValueError("Mode must be manual or automatic")
+        if mode != self.operation_mode:
+            self.disable("Operating mode changed; a fresh permission is required", now=now)
+            self.operation_mode = mode
+            self.game_display.operation_mode = mode
+            self.game_display.refresh(self.clock() if now is None else now, False)
+            print(f"Operating mode: {mode}; automatic pickup is not connected")
+
+    def request_mode(self, mode: str) -> dict:
+        if mode not in ("manual", "automatic"):
+            raise RuntimeError("Mode must be manual or automatic")
+        if not self.running:
+            raise RuntimeError("Controller is stopped")
+        completed = threading.Event()
+        try:
+            self._mode_requests.put_nowait((mode, completed, self.clock() + 0.3))
+        except queue.Full as error:
+            raise RuntimeError("Another mode request is pending") from error
+        if not completed.wait(0.3):
+            completed.set()
+            raise RuntimeError("Controller did not acknowledge the mode request")
+        return self.get_status()
+
+    def process_mode_requests(self, now: float) -> None:
+        try:
+            mode, completed, deadline = self._mode_requests.get_nowait()
+        except queue.Empty:
+            return
+        try:
+            if not completed.is_set() and self.clock() <= deadline:
+                self.set_mode(mode, now=now)
+        finally:
+            completed.set()
+
+    def can_move(self, now=None) -> bool:
+        now = self.clock() if now is None else now
+        self.game_display.permission.update(now)
+        return (self.running and self.connected and self.operation_mode == "manual" and self.position_confirmed
+                and self.game_display.movement_allowed)
+
+    def set_pulse(self, channel: int, pulse_us: float) -> bool:
+        if not self.armed or not self.can_move():
+            self.disable("Movement permission is no longer valid", revoke=False)
+            return False
+        try:
+            self._outputs_disabled = False
+            self.board.set_pulse(channel, pulse_us)
+        except Exception:
+            self.disable("Servo output failed")
+            raise
+        return True
+
+    def disable(self, reason: str, *, now=None, revoke=True) -> None:
+        now = self.clock() if now is None else now
         self.returning_home = False
         self.return_waypoints = []
         self.return_waypoint_index = 0
         self.return_mode = None
         self.escape_only = False
-
         self.home_required_after_stop = True
-
         was_armed = self.armed
         self.armed = False
-
-        self.board.disable_outputs()
-
+        self.position_confirmed = False
+        self.velocities = {servo.name: 0.0 for servo in self.settings.axis_servos}
+        self.gripper_target = self.pulses["gripper"]
+        self.last_stop_reason = reason
+        try:
+            if not self._outputs_disabled:
+                self.board.disable_outputs()
+                self._outputs_disabled = True
+        finally:
+            if revoke:
+                self.game_display.cancel(now, reason)
+            self.game_display.refresh(now, False)
         if was_armed:
-            print(
-                f"\nPWM disabled: {reason}"
-            )
+            print(f"\nPWM disabled: {reason}")
+
+    def confirm_position(self, state: ControllerState) -> bool:
+        if (self.armed or not self.running or not self.connected or self.operation_mode != "manual" or not self.neutral(state)
+                or self.game_display.emergency_stop_active or self.game_display.stop_button.is_pressed):
+            return False
+        self.position_confirmed = True
+        self.gripper_target = self.pulses["gripper"]
+        self.last_stop_reason = "Stored pulse pose confirmed; press green or white for permission"
+        return True
 
     def reset_to_home(self) -> None:
         self.pulses = {
@@ -1353,251 +1518,27 @@ class ManualController:
 
         return result
 
-    def start_game_over_return(
-        self,
-        now: float,
-    ) -> None:
-        if not self.armed:
-            self.pulses["gripper"] = (
-                self.settings
-                .gripper
-                .open_pulse_us
-            )
-
-            self.game_display.show_game_over_complete(
-                home_reached=False,
-            )
-
-            print(
-                "\nGame over, but PWM was already "
-                "disabled. The arm could not "
-                "physically return home."
-            )
-            return
-
-        print(
-            "\nGame over: opening gripper."
-        )
-
-        self.pulses["gripper"] = (
-            self.settings
-            .gripper
-            .open_pulse_us
-        )
-
-        self.board.set_pulse(
-            self.settings.gripper.channel,
-            self.pulses["gripper"],
-        )
-
-        self.return_waypoints = (
-            self.build_game_over_return_path()
-        )
-
-        self.return_waypoint_index = 0
-
-        self.home_release_until = (
-            now + GRIPPER_RELEASE_SECONDS
-        )
-
-        self.return_mode = "game_over"
-        self.returning_home = True
-
-    def update_game_over_return(
-        self,
-        now: float,
-        elapsed: float,
-    ) -> None:
-        if (
-            not self.returning_home
-            or not self.armed
-        ):
-            return
-
-        if now < self.home_release_until:
-            return
-
-        if not self.return_waypoints:
-            self.returning_home = False
-            self.return_mode = None
-
-            self.game_display.show_game_over_complete(
-                home_reached=False,
-            )
-
-            self.disable(
-                "no recorded safe return route "
-                "for this position"
-            )
-
-            return
-
-        if (
-            self.return_waypoint_index
-            >= len(self.return_waypoints)
-        ):
-            return
-
-        target = self.return_waypoints[
-            self.return_waypoint_index
-        ]
-
-        waypoint_reached = True
-
-        for servo in self.settings.axis_servos:
-            current = self.pulses[
-                servo.name
-            ]
-
-            target_pulse = target[
-                servo.name
-            ]
-
-            speed = max(
-                servo.speed_us_per_second,
-                HOME_RETURN_MIN_SPEED_US_PER_SECOND,
-            )
-
-            maximum_step = (
-                speed * elapsed
-            )
-
-            difference = (
-                target_pulse - current
-            )
-
-            if abs(difference) <= maximum_step:
-                new_pulse = target_pulse
-            else:
-                new_pulse = (
-                    current
-                    + math.copysign(
-                        maximum_step,
-                        difference,
-                    )
-                )
-
-                waypoint_reached = False
-
-            self.pulses[
-                servo.name
-            ] = new_pulse
-
-            self.board.set_pulse(
-                servo.channel,
-                new_pulse,
-            )
-
-            if (
-                abs(new_pulse - target_pulse)
-                > 0.5
-            ):
-                waypoint_reached = False
-
-        if not waypoint_reached:
-            return
-
-        self.return_waypoint_index += 1
-
-        print(
-            "\nReturn waypoint reached: "
-            f"{self.return_waypoint_index}/"
-            f"{len(self.return_waypoints)}"
-        )
-
-        if (
-            self.return_waypoint_index
-            < len(self.return_waypoints)
-        ):
-            return
-
-        completed_mode = self.return_mode
-        self.returning_home = False
-        self.return_mode = None
-
-        if (
-            completed_mode
-            == "emergency_recovery"
-        ):
-            print(
-                "\nEmergency-stop recovery complete. "
-                "The arm is at the TOML home position."
-            )
-
-            return
-
-        self.game_display.show_game_over_complete(
-            home_reached=True,
-        )
-
-        self.disable(
-            "game over: gripper opened, "
-            "shelf cleared and home position reached"
-        )
-
-    def enable(self) -> None:
-        self.board.disable_outputs()
-
-        return_path = (
-            self.build_game_over_return_path()
-        )
-
-        if not return_path:
-            if self.glass_guard_active():
-                self.enable_escape_only()
-                return
-
-            print(
-                "\nPWM remains disabled: there is no "
-                "recorded safe return route for the "
-                "current position."
-            )
-
-            return
-
+    def enable(self) -> bool:
+        if not self.can_move():
+            self.disable("No permission, verified pose or manual operating mode")
+            return False
+        self.armed = True
+        self.velocities = {servo.name: 0.0 for servo in self.settings.axis_servos}
+        self.gripper_target = self.pulses["gripper"]
+        self.escape_only = self.glass_guard_active()
         try:
             for servo in self.settings.axis_servos:
-                self.board.set_pulse(
-                    servo.channel,
-                    self.pulses[servo.name],
-                )
-
-            self.pulses["gripper"] = (
-                self.settings
-                .gripper
-                .open_pulse_us
-            )
-
-            self.board.set_pulse(
-                self.settings.gripper.channel,
-                self.pulses["gripper"],
-            )
-
+                if not self.set_pulse(servo.channel, self.pulses[servo.name]):
+                    return False
+            if not self.set_pulse(self.settings.gripper.channel, self.pulses["gripper"]):
+                return False
         except Exception:
-            self.board.disable_outputs()
+            self.disable("Could not enable servo outputs")
             raise
-
         self.home_required_after_stop = False
-        self.armed = True
-        self.escape_only = False
-        self.return_waypoints = return_path
-        self.return_waypoint_index = 0
-
-        self.home_release_until = (
-            time.monotonic()
-            + GRIPPER_RELEASE_SECONDS
-        )
-
-        self.return_mode = (
-            "emergency_recovery"
-        )
-        self.returning_home = True
-
-        print(
-            "\nPWM enabled. Emergency-stop recovery: "
-            "opening the gripper and following a "
-            "safe route to the TOML home position."
-        )
+        self.last_stop_reason = "Manual movement permission active"
+        self.game_display.refresh(self.clock(), True)
+        return True
 
     def glass_guard_active(self) -> bool:
         return (
@@ -1607,38 +1548,6 @@ class ManualController:
             >= GLASS_GUARD_SHOULDER_START_US
             and self.pulses["elbow"]
             <= GLASS_GUARD_ELBOW_MIN_US
-        )
-
-    def enable_escape_only(self) -> None:
-        try:
-            for servo in self.settings.axis_servos:
-                self.board.set_pulse(
-                    servo.channel,
-                    self.pulses[servo.name],
-                )
-
-            self.board.set_pulse(
-                self.settings.gripper.channel,
-                self.pulses["gripper"],
-            )
-
-        except Exception:
-            self.board.disable_outputs()
-            raise
-
-        self.armed = True
-        self.escape_only = True
-        self.returning_home = False
-        self.return_mode = None
-        self.return_waypoints = []
-        self.return_waypoint_index = 0
-
-        print(
-            "\nESCAPE-ONLY MODE: this is a forbidden "
-            "pose. Only movements that make base and "
-            "shoulder numbers smaller or the elbow "
-            "number larger are accepted. Wrist and "
-            "gripper commands are blocked."
         )
 
     def near_home_arm_shape(self) -> bool:
@@ -1668,10 +1577,8 @@ class ManualController:
 
     def toggle_enabled(self) -> None:
         if self.armed:
-            self.disable(
-                "D-pad UP pressed"
-            )
-        else:
+            self.disable("D-pad UP pressed")
+        elif self.game_display.movement_allowed:
             self.enable()
 
     def apply_manual_safety_limit(
@@ -1724,149 +1631,85 @@ class ManualController:
 
         return candidate
 
-    def update_motion(
-        self,
-        state: ControllerState,
-        elapsed: float,
-    ) -> None:
+    def update_motion(self, state: ControllerState, elapsed: float) -> None:
+        if not self.armed or not self.can_move():
+            if self.armed:
+                self.disable("Movement permission expired", revoke=False)
+            return
+        elapsed = max(0.0, min(elapsed, 2.0 / self.settings.loop_hz))
         for servo in self.settings.axis_servos:
-            amount = axis_amount(
-                getattr(
-                    state,
-                    servo.axis,
-                ),
-                self.settings.dead_zone,
-            )
-
-            if amount == 0.0:
-                continue
-
-            pulse = (
-                self.pulses[servo.name]
-                + amount
-                * servo.invert
-                * servo.speed_us_per_second
-                * elapsed
-            )
-
-            pulse = max(
-                servo.minimum_pulse_us,
-                min(
-                    servo.maximum_pulse_us,
-                    pulse,
-                ),
-            )
-
+            target_velocity = (axis_amount(getattr(state, servo.axis), self.settings.dead_zone)
+                               * servo.invert * servo.speed_us_per_second)
+            step = servo.speed_us_per_second * elapsed / self.settings.motion_ramp_seconds
+            velocity = self.velocities[servo.name]
+            velocity += max(-step, min(step, target_velocity - velocity))
+            self.velocities[servo.name] = velocity
+            pulse = self.pulses[servo.name] + velocity * elapsed
+            pulse = max(servo.minimum_pulse_us, min(servo.maximum_pulse_us, pulse))
             if self.escape_only:
-                if servo.name == "base":
-                    pulse = min(
-                        pulse,
-                        self.pulses["base"],
-                    )
-
-                elif servo.name == "shoulder":
-                    pulse = min(
-                        pulse,
-                        self.pulses["shoulder"],
-                    )
-
+                if servo.name in ("base", "shoulder"):
+                    pulse = min(pulse, self.pulses[servo.name])
                 elif servo.name == "elbow":
-                    pulse = max(
-                        pulse,
-                        self.pulses["elbow"],
-                    )
-
+                    pulse = max(pulse, self.pulses[servo.name])
                 else:
-                    pulse = (
-                        self.pulses[servo.name]
-                    )
-
-            pulse = (
-                self.apply_manual_safety_limit(
-                    servo.name,
-                    pulse,
-                )
-            )
-
-            self.pulses[
-                servo.name
-            ] = pulse
-
-            self.board.set_pulse(
-                servo.channel,
-                pulse,
-            )
-
+                    pulse = self.pulses[servo.name]
+            pulse = self.apply_manual_safety_limit(servo.name, pulse)
+            if pulse != self.pulses[servo.name]:
+                if not self.set_pulse(servo.channel, pulse):
+                    return
+                self.pulses[servo.name] = pulse
         if self.escape_only:
             if self.near_home_arm_shape():
-                self.disable(
-                    "escape position reached"
-                )
-
-                print(
-                    "\nThe dangerous arm shape has been "
-                    "cleared. Press D-pad UP again to "
-                    "follow the safe return to home."
-                )
-
+                self.disable("Escape position reached; confirm pose and request fresh permission")
             return
+        if state.pressed(PSB_R1) != state.pressed(PSB_L1):
+            self.gripper_target = (self.settings.gripper.open_pulse_us if state.pressed(PSB_R1)
+                                   else self.settings.gripper.closed_pulse_us)
+        difference = self.gripper_target - self.pulses["gripper"]
+        step = self.settings.gripper.speed_us_per_second * elapsed
+        pulse = self.pulses["gripper"] + max(-step, min(step, difference))
+        if pulse != self.pulses["gripper"]:
+            if not self.set_pulse(self.settings.gripper.channel, pulse):
+                return
+            self.pulses["gripper"] = pulse
 
-        r1_pressed = state.pressed(
-            PSB_R1
-        )
-        l1_pressed = state.pressed(
-            PSB_L1
-        )
-
-        if (
-            r1_pressed
-            and not l1_pressed
-        ):
-            pulse = (
-                self.settings
-                .gripper
-                .open_pulse_us
-            )
-
-            if (
-                pulse
-                != self.pulses["gripper"]
-            ):
-                self.pulses[
-                    "gripper"
-                ] = pulse
-
-                self.board.set_pulse(
-                    self.settings
-                    .gripper
-                    .channel,
-                    pulse,
-                )
-
-        elif (
-            l1_pressed
-            and not r1_pressed
-        ):
-            pulse = (
-                self.settings
-                .gripper
-                .closed_pulse_us
-            )
-
-            if (
-                pulse
-                != self.pulses["gripper"]
-            ):
-                self.pulses[
-                    "gripper"
-                ] = pulse
-
-                self.board.set_pulse(
-                    self.settings
-                    .gripper
-                    .channel,
-                    pulse,
-                )
+    def control_step(self, state: ControllerState | None, now: float, elapsed: float) -> None:
+        self.process_mode_requests(now)
+        event = self.game_display.update(now, self.armed)
+        if event in ("game_stopped", "emergency_stop", "game_over"):
+            self.disable(event, now=now, revoke=False)
+        if self.game_display.emergency_stop_active or self.game_display.stop_button.is_pressed:
+            if self.armed or self.position_confirmed:
+                self.disable("Stop input active", now=now)
+            if state is not None:
+                self.previous_buttons = state.buttons
+            return
+        if state is None:
+            # Drop permission even during the packet timeout grace period.
+            if self.armed or self.position_confirmed or self.game_display.movement_allowed:
+                self.disable("Joystick input unavailable", now=now)
+            self.previous_buttons = 0xFFFF
+            return
+        pressed_edges = state.buttons & ~self.previous_buttons
+        self.previous_buttons = state.buttons
+        if state.pressed(PSB_DISABLE):
+            self.disable("D-pad DOWN pressed", now=now)
+            return
+        if pressed_edges & PSB_MODE:
+            self.set_mode("automatic" if self.operation_mode == "manual" else "manual", now=now)
+            return
+        if pressed_edges & PSB_CONFIRM:
+            self.confirm_position(state)
+        if event in ("game_started", "setup_started"):
+            if self.connected and self.neutral(state) and self.position_confirmed:
+                self.enable()
+            else:
+                self.disable("Centre sticks, confirm the actual pose with START, then request fresh permission", now=now)
+        elif pressed_edges & PSB_TOGGLE:
+            self.toggle_enabled()
+        if self.armed:
+            self.update_motion(state, elapsed)
+        self.game_display.refresh(now, self.armed)
 
     def display_status(
         self,
@@ -1881,6 +1724,7 @@ class ManualController:
                 else "DISABLED"
             )
 
+        mode = f"{self.operation_mode.upper()} {mode}"
         pulse_text = " ".join(
             f"{name}={pulse:.0f}"
             for name, pulse
@@ -1921,228 +1765,161 @@ class ManualController:
         )
 
     def run(self) -> None:
-        print("PS2 robot-arm control")
-        print("=====================")
-        print(
-            "D-pad UP    enable/disable PWM"
-        )
-        print(
-            "D-pad DOWN  emergency PWM disable"
-        )
-        print(
-            "Left stick X/Y   base/shoulder"
-        )
-        print(
-            "Right stick Y/X  elbow/wrist"
-        )
-        print(
-            "R1 open gripper; L1 close gripper"
-        )
-        print(
-            "Ctrl+C exits and disables every "
-            "configured output"
-        )
-        print()
-        print(
-            "PWM is currently disabled."
-        )
-
-        loop_interval = (
-            1.0 / self.settings.loop_hz
-        )
-        status_interval = (
-            1.0 / self.settings.status_hz
-        )
-
+        print("START confirms actual stored pose; SELECT switches manual/automatic.")
+        print("Green grants timed permission; white setup (if wired); red/D-pad DOWN revoke.")
+        print("Automatic movement is unavailable; no return or gripper opening occurs after a stop.")
+        if self.settings.control_api_enabled:
+            from control_api import start_control_api
+            try:
+                self.api_server = start_control_api(self.get_status, self.request_mode,
+                                                    port=self.settings.control_api_port)
+            except OSError as error:
+                print(f"Mode/status API unavailable: {error}")
+        loop_interval = 1.0 / self.settings.loop_hz
         try:
             while self.running:
-                now = time.monotonic()
-
-                elapsed = min(
-                    0.100,
-                    now - self.last_loop,
-                )
-
+                now = self.clock()
+                elapsed = min(0.1, max(0.0, now - self.last_loop))
                 self.last_loop = now
-
-                game_event = (
-                    self.game_display.update(
-                        now,
-                        self.armed,
-                    )
-                )
-
-                if (
-                    game_event
-                    == "game_started"
-                ):
-                    if not self.armed:
-                        self.enable()
-
-                elif (
-                    game_event
-                    == "game_stopped"
-                ):
-                    self.disable(
-                        "red STOP button pressed"
-                    )
-
-                elif (
-                    game_event
-                    == "game_over"
-                ):
-                    self.start_game_over_return(
-                        now
-                    )
-
-                if not self.connected:
-                    self.disable(
-                        "controller disconnected"
-                    )
-
-                    if now < self.next_retry:
-                        time.sleep(
-                            loop_interval
-                        )
-                        continue
-
-                    self.next_retry = (
-                        now
-                        + self.settings
-                        .reconnect_interval_seconds
-                    )
-
-                    try:
-                        self.connected = (
-                            self.controller.begin()
-                        )
-                    except OSError as error:
-                        print(
-                            f"\nPS2 SPI error: {error}"
-                        )
-
-                        self.connected = False
-
-                    if not self.connected:
-                        print(
-                            "\rWaiting for "
-                            "PS2 controller...",
-                            end="",
-                            flush=True,
-                        )
-
-                        time.sleep(
-                            loop_interval
-                        )
-                        continue
-
-                    self.previous_buttons = (
-                        0xFFFF
-                    )
-                    self.last_good_read = now
-
-                    print(
-                        "\nPS2 controller connected. "
-                        "PWM remains disabled."
-                    )
-
+                state = None
                 try:
-                    state = (
-                        self.controller.read()
-                    )
+                    if not self.connected and now >= self.next_retry:
+                        self.next_retry = now + self.settings.reconnect_interval_seconds
+                        self.connected = self.controller.begin()
+                        self.previous_buttons = 0xFFFF
+                        self.position_confirmed = False
+                    if self.connected:
+                        state = self.controller.read()
                 except OSError as error:
-                    print(
-                        f"\nPS2 read error: {error}"
-                    )
-                    state = None
-
+                    print(f"Joystick read failed: {error}")
                 if state is None:
-                    if (
-                        now - self.last_good_read
-                        >= self.settings
-                        .disconnect_timeout_seconds
-                    ):
+                    if now - self.last_good_read >= self.settings.disconnect_timeout_seconds:
                         self.connected = False
-
-                        self.disable(
-                            "controller timeout"
-                        )
-
-                    time.sleep(
-                        loop_interval
-                    )
-                    continue
-
-                self.last_good_read = now
-
-                pressed_edges = (
-                    state.buttons
-                    & ~self.previous_buttons
-                )
-
-                self.previous_buttons = (
-                    state.buttons
-                )
-
-                if (
-                    pressed_edges
-                    & PSB_DISABLE
-                ):
-                    self.disable(
-                        "D-pad DOWN pressed"
-                    )
-
-                elif (
-                    pressed_edges
-                    & PSB_TOGGLE
-                ):
-                    self.toggle_enabled()
-
-                if self.returning_home:
-                    self.update_game_over_return(
-                        now,
-                        elapsed,
-                    )
-
-                elif self.armed:
-                    self.update_motion(
-                        state,
-                        elapsed,
-                    )
-
-                if now >= self.next_status:
-                    self.next_status = (
-                        now + status_interval
-                    )
-
-                    self.display_status(
-                        state
-                    )
-
-                time.sleep(
-                    loop_interval
-                )
-
+                else:
+                    self.last_good_read = now
+                self.control_step(state, now, elapsed)
+                if state is not None and now >= self.next_status:
+                    self.next_status = now + 1.0 / self.settings.status_hz
+                    self.display_status(state)
+                time.sleep(loop_interval)
         except KeyboardInterrupt:
-            print()
-
+            pass
         finally:
             self.close()
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self.running = False
-
         try:
-            self.board.close()
+            self.disable("Controller shutdown")
         finally:
             try:
-                self.game_display.close()
+                self.board.close()
             finally:
-                self.controller.close()
+                try:
+                    if self.api_server is not None:
+                        self.api_server.shutdown()
+                        self.api_server.server_close()
+                        self.api_server = None
+                finally:
+                    try:
+                        self.game_display.close()
+                    finally:
+                        self.controller.close()
+        print("All configured PCA9685 outputs are OFF.")
 
-        print(
-            "All configured PCA9685 outputs are OFF."
-        )
+
+def run_simulation(settings: Settings) -> None:
+    now = time.monotonic()
+    button = lambda: SimpleNamespace(is_pressed=False, close=lambda: None)
+    light = SimpleNamespace(value=False, close=lambda: None)
+    light.on = lambda: setattr(light, "value", True)
+    light.off = lambda: setattr(light, "value", False)
+    devices = SimpleNamespace(
+        start_button=button(), stop_button=button(), setup_button=button(),
+        emergency_stop_button=button(), game_light=light,
+        lcd=SimpleNamespace(cursor_pos=(0, 0), write_string=lambda text: None,
+                            clear=lambda: None, close=lambda **kwargs: None),
+    )
+    devices.emergency_stop_button.is_pressed = True
+    writes = []
+    board = SimpleNamespace(set_pulse=lambda channel, pulse: writes.append((channel, pulse)),
+                            disable_outputs=lambda: None, close=lambda: None)
+    joystick = SimpleNamespace(close=lambda: None)
+    display = GameDisplay(settings.permission_seconds, notice_seconds=settings.end_message_seconds,
+                          emergency_stop_healthy_pressed=True, devices=devices)
+    controller = ManualController(settings, controller=joystick, board=board,
+                                  game_display=display, simulated=True, clock=lambda: now)
+    controller.connected = True
+    axes = dict(left_x=128, left_y=128, right_x=128, right_y=128)
+    print("SIMULATION ONLY: no GPIO, LCD, gamepad or PCA9685 is opened.")
+    print("Commands: confirm, green, setup, red, manual, automatic, up, down,")
+    print("  stick left_x|left_y|right_x|right_y 0..255, open, grip, neutral,")
+    print("  tick SECONDS, disconnect, reconnect, estop, reset, status, quit")
+
+    def step(buttons=0, elapsed=0.02):
+        state = ControllerState(**axes, buttons=buttons) if controller.connected else None
+        controller.control_step(state, now, elapsed)
+
+    try:
+        for line in sys.stdin:
+            args = line.strip().split()
+            if not args:
+                continue
+            command = args[0].lower()
+            try:
+                if command in ("quit", "q"):
+                    break
+                elif command in ("green", "setup", "red"):
+                    button_input = {"green": devices.start_button, "setup": devices.setup_button,
+                                    "red": devices.stop_button}[command]
+                    button_input.is_pressed = True
+                    step()
+                    button_input.is_pressed = False
+                    step(elapsed=0)
+                elif command in ("manual", "automatic"):
+                    controller.set_mode(command, now=now)
+                elif command in ("confirm", "up", "down", "open", "grip"):
+                    step({"confirm": PSB_CONFIRM, "up": PSB_TOGGLE, "down": PSB_DISABLE,
+                          "open": PSB_R1, "grip": PSB_L1}[command])
+                    step(elapsed=0)
+                elif command == "stick":
+                    if len(args) != 3 or args[1] not in axes or not 0 <= int(args[2]) <= 255:
+                        raise ValueError("Use stick AXIS VALUE (0..255)")
+                    axes[args[1]] = int(args[2])
+                    step()
+                elif command == "neutral":
+                    axes = {name: 128 for name in axes}
+                    step()
+                elif command == "tick":
+                    seconds = float(args[1])
+                    if not math.isfinite(seconds) or not 0 <= seconds <= 3600:
+                        raise ValueError("Tick must be finite and from 0 to 3600 seconds")
+                    remaining = seconds
+                    target_time = now + seconds
+                    while remaining > 1e-9:
+                        elapsed = min(1.0 / settings.loop_hz, remaining)
+                        now += elapsed
+                        step(elapsed=elapsed)
+                        remaining -= elapsed
+                    now = target_time
+                    step(elapsed=0)
+                elif command in ("disconnect", "reconnect"):
+                    controller.connected = command == "reconnect"
+                    controller.disable("Simulated joystick connection changed", now=now)
+                elif command in ("estop", "reset"):
+                    devices.emergency_stop_button.is_pressed = command == "reset"
+                    step()
+                elif command != "status":
+                    raise ValueError("Unknown command")
+                print(json.dumps({**controller.get_status(), "led": light.value,
+                                  "simulated_output_writes": len(writes), "pulses_us": controller.pulses}))
+            except (ValueError, IndexError) as error:
+                print(f"Invalid simulation command: {error}")
+    finally:
+        controller.close()
 
 
 def main() -> None:
@@ -2163,6 +1940,10 @@ def main() -> None:
     settings = load_settings(
         config_path
     )
+
+    if args.simulate:
+        run_simulation(settings)
+        return
 
     if args.diagnose:
         run_diagnostics(

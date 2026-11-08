@@ -15,10 +15,6 @@ from typing import Final
 # This must be set before importing RPi.GPIO/rpi-lgpio.
 os.environ.setdefault("RPI_LGPIO_CHIP", "0")
 
-import RPi.GPIO as GPIO
-from wlgamepad import WLGamepad
-
-
 # BCM GPIO numbering; these match the robot's verified wiring.
 PS2_DATA_GPIO: Final = 25
 PS2_COMMAND_GPIO: Final = 13
@@ -64,6 +60,10 @@ class Ps2Controller:
     """Adapt Joy-IT's API to the robot controller's existing interface."""
 
     def __init__(self) -> None:
+        import RPi.GPIO as GPIO
+        from wlgamepad import WLGamepad
+
+        self._gpio = GPIO
         self._closed = False
         self._controller = WLGamepad(
             ATT=PS2_ATTENTION_GPIO,
@@ -120,7 +120,7 @@ class Ps2Controller:
             return
 
         self._closed = True
-        GPIO.cleanup(
+        self._gpio.cleanup(
             [
                 PS2_ATTENTION_GPIO,
                 PS2_CLOCK_GPIO,

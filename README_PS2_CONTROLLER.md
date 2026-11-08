@@ -1,126 +1,116 @@
-# Raspberry Pi PS2 robot-arm controller
+# Current PS2 robot-arm controls
 
-This controller talks directly to:
+`run_ps2_controller.sh` starts `ps2_manual_control.py`. The active driver uses
+Joy-IT's `WLGamepad` transfer library and the existing BCM pins below; the older
+SPI wiring documented in `config.py` belongs to the legacy entry point.
 
-- the PS2 receiver through Raspberry Pi SPI0/CE0;
-- the PCA9685 servo board at I2C address `0x40`.
+## Existing wiring
 
-It does not use an Arduino, LCD, cabinet buttons, or relay.
+| Signal | BCM GPIO |
+| --- | ---: |
+| PS2 DATA | 25 |
+| PS2 CMD | 13 |
+| PS2 ATT | 12 |
+| PS2 CLK | 18 |
+| Green start button to GND | 5 |
+| Red stop button to GND | 6 |
+| Permission LED relay, active-low | 8 |
 
-## Files
+The PCA9685 address is `0x40`; the existing LCD is at `0x27` on I2C bus 20.
+Keep the existing Pi environment and its Joy-IT, GPIO, LCD and PCA9685 libraries.
+Do not substitute the legacy GPIO17/27/22/23 button wiring. The white setup button
+and optional E-stop feedback need their actual wiring configured under
+`[operation]` in `config/ps2_controller.toml`; no GPIO is guessed for them.
+Optional E-stop feedback requires a verified supervised normally-closed contact
+to GND and `emergency_stop_healthy_pressed = true`; an open/broken contact blocks
+permission. The opposite, unverified polarity is rejected.
 
-Copy these into the existing `Robot-Controller` repository:
-
-```text
-Robot-Controller/
-├── ps2_manual_control.py
-├── ps2_controller.py
-├── run_ps2_controller.sh
-├── config.py
-└── config/
-    ├── servos.toml
-    └── ps2_controller.toml
-```
-
-`ps2_controller.py`, `config.py`, and `config/servos.toml` already exist.
-
-## PS2 receiver connection
-
-The existing driver uses `/dev/spidev0.0`:
-
-| PS2 receiver label | Raspberry Pi signal | BCM GPIO | Physical pin |
-|---|---|---:|---:|
-| DAT | SPI0 MISO | GPIO9 | 21 |
-| CMD | SPI0 MOSI | GPIO10 | 19 |
-| ATT / CS | SPI0 CE0 | GPIO8 | 24 |
-| CLK | SPI0 SCLK | GPIO11 | 23 |
-| GND | Ground | - | 6 |
-| VCC | 3.3 V | - | 1 |
-
-Raspberry Pi GPIO uses 3.3 V logic. Do not feed 5 V logic into a GPIO pin.
-Receiver boards can use different printed labels, so match the signal names,
-not the wire colours.
-
-Enable SPI through:
+## Start without hardware
 
 ```bash
-sudo raspi-config
+python ps2_manual_control.py --simulate
 ```
 
-Select `Interface Options`, then `SPI`, then enable it. Reboot if requested.
-
-Verify the device:
+This exercises controller/permission logic with fake GPIO, display and PWM.
+Use the command list printed at startup to grant/cancel permission, change modes,
+and inspect simulated output. It cannot move physical servos. Automated tests use
+only the Python standard library:
 
 ```bash
-ls -l /dev/spidev0.0
+PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -v
 ```
 
-## First run: controller diagnosis only
+## Pi input diagnosis
 
-This mode never opens the PCA9685 and cannot move a servo:
+With the existing controller environment:
 
 ```bash
-cd ~/dev/Robot-Controller
 bash run_ps2_controller.sh --diagnose
 ```
 
-Move both sticks and press START, SELECT, L1, and R1. The four stick values
-should rest near `128` and travel toward `0` and `255`. Button presses appear
-in the hexadecimal `buttons` value.
+Move the sticks and press buttons. Neutral stick values should be near 128.
+Diagnosis opens the PS2 receiver but never the PCA9685. Stop it with Ctrl+C.
 
-Stop with `Ctrl+C`.
-
-## Manual arm control
-
-Make sure no other application is controlling the PCA9685, then run:
+## Manual operation
 
 ```bash
-cd ~/dev/Robot-Controller
 bash run_ps2_controller.sh
 ```
 
-The script starts with all configured PWM outputs disabled.
+Start with neutral sticks and all controls released. Verify that the physical
+arm matches the stored position, then press START to confirm it. This does not
+move the arm. Press the cabinet green button for the configured 90-second
+permission or the configured white button for setup permission.
 
-| PS2 input | Action |
-|---|---|
-| START | Enable or disable all configured PWM outputs |
-| SELECT | Immediately disable all configured PWM outputs |
-| Left stick X | Rotate base |
-| Left stick Y | Move shoulder |
-| Right stick Y | Move elbow |
-| Right stick X | Move wrist |
-| R1 | Open gripper |
-| L1 | Close gripper |
-| Ctrl+C | Disable outputs and exit |
+| Input | Action |
+| --- | --- |
+| START | Confirm actual pose against stored pulses, with PWM stopped |
+| SELECT | Switch manual/automatic; revoke permission and disable PWM |
+| D-pad UP | Toggle PWM within an already granted permission |
+| D-pad DOWN | Software stop: revoke permission and disable PWM |
+| Left stick X/Y | Base / shoulder, manual mode only |
+| Right stick Y/X | Elbow / wrist, manual mode only |
+| R1 / L1 | Gripper open / close, manual mode only |
+| Green cabinet button | Request timed permission |
+| White cabinet button | Request untimed setup permission, if configured |
+| Red cabinet button | Revoke permission and stop PWM |
+| Ctrl+C | Disable PWM and exit |
 
-If valid controller packets stop for 0.5 seconds, the program disables every
-configured servo output.
+A valid connection, confirmed position, neutral controls and manual mode are
+required before a new permission can arm the axes. Cancellation, timeout,
+disconnection and mode changes invalidate the confirmation. Reconnecting or
+releasing a stop cannot restart motion by itself. Hold red to prevent any start.
 
-## Servo configuration
+The permission LED follows actual permitted PWM. The LCD shows timed operation,
+setup, cancellation and expiry; end messages remain for about 10 seconds.
+There is no automatic gripper opening or home-return after permission expires.
+Automatic mode accepts mode/status coordination only and blocks joystick motion;
+actual camera pickup is not connected yet.
 
-All editable pulse limits, initial pulses, stick directions, dead-zone values,
-and movement speeds are in:
+## Servo and operational settings
 
-```text
-config/ps2_controller.toml
-```
-
-Pressing START sends the configured `start_pulse_us` values. These values must
-describe a mechanically valid arm pose before enabling PWM.
-
-The configured channels are:
+`config/ps2_controller.toml` is the active source of measured pulse ranges,
+initial angles, channels, directions, dead zones and maximum joint speeds.
+Do not use the obsolete 700/1275 microsecond gripper example from earlier notes.
+The current configured outputs are:
 
 | Joint | PCA9685 channel |
-|---|---:|
+| --- | ---: |
 | Base | 0 |
 | Shoulder | 2 |
 | Elbow | 4 |
 | Wrist | 6 |
 | Gripper | 8 |
 
-The gripper uses the tested values:
+The motion ramp limits abrupt velocity changes without raising existing axis
+speed limits. Gripper targets are approached gradually. Pulse values are stored
+commands, not measured joint positions; after a power loss, verify the pose before
+confirming it or enabling PWM.
 
-```text
-Open:   700 us
-Closed: 1275 us
-```
+The loopback API defaults to port 8765: `GET /status` and `POST /mode`.
+It exposes no servo command or permission-grant route. The backend reaches it
+using `ROBOT_CONTROLLER_URL`; mode changes revoke permission in either direction.
+
+See [the main README](README.md) for calibration coordinates and the remaining
+physical E-stop/restart, USB and hardware-verification work. No hardware safety
+circuit is bypassed or declared tested by offline simulation.
